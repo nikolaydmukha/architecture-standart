@@ -1,0 +1,46 @@
+@startuml 02_Components
+!include ../C4_Component.puml
+
+title C4 — Компоненты системы передачи депозитных ставок
+
+Person(operator, "Оператор кол-центра", "Получает информацию о ставках")
+
+System_Ext(abs, "АБС/система управления ставками", "Источник утверждённых ставок")
+
+System_Ext(partner, "Партнёрский кол-центр")
+
+System_Boundary(solution, "Контур публикации депозитных ставок") {
+    Container_Boundary(registry, "Централизованный справочник ставок") {
+        Component(ingestion, "Rate Ingestion Adapter", "Integration Service", "Получает и валидирует утверждённые ставки")
+        Component(rateDB, "Rate Registry DB", "Database", "Хранит ставки, версии и периоды действия")
+        Component(readAPI, "Rate Read API", "REST API", "Предоставляет ставки внутреннему кол-центру")
+        Component(eventPublisher, "Event Publisher", "Event Producer", "Публикует событие DepositRateUpdated")
+    }
+    Container_Boundary(fileSubsystem, "Файловая интеграция") {
+        Component(fileGenerator, "File Generation Service", "File Generator", "Формирует полный snapshot ставок в CSV/XLSX")
+        Component(fileTransfer, "Secure File Transfer", "SFTP/MFT Client", "Передаёт файлы партнёру, выполняет retry и проверку checksum")
+    }
+    Container(eventBus, "Kafka/Event Bus","Message Broker","Передаёт события об изменении ставок")
+    Container(monitoring, "Monitoring & Audit","Monitoring Service","Собирает метрики, логи, ошибки и историю доставки")
+}
+
+System_Ext(internalUI, "Рабочее место оператора", "Интерфейс внутреннего кол-центра")
+
+Rel(abs, ingestion, "Передаёт утверждённые ставки")
+Rel(ingestion, rateDB, "Валидирует и сохраняет ставки")
+Rel(rateDB, readAPI, "Предоставляет данные для чтения")
+Rel(readAPI, internalUI, "HTTPS API")
+Rel(operator, internalUI, "Просматривает ставки")
+
+Rel(rateDB, eventPublisher, "Изменение опубликованных ставок")
+Rel(eventPublisher, eventBus, "DepositRateUpdated")
+Rel(eventBus, fileGenerator, "Запускает формирование файла")
+Rel(fileGenerator, rateDB, "Читает актуальные ставки")
+Rel(fileGenerator, fileTransfer, "Передаёт файл")
+Rel(fileTransfer, partner, "SFTP/MFT")
+
+Rel(ingestion, monitoring, "Ошибки и аудит")
+Rel(fileGenerator, monitoring, "Статус генерации")
+Rel(fileTransfer, monitoring, "Статус доставки")
+
+@enduml
