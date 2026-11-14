@@ -1,0 +1,74 @@
+@startuml 02_containers
+!include ../C4_Container.puml
+title C4 — Контейнеры MVP цифрового открытия депозитов
+
+Person(newClient, "Новый клиент")
+Person(existingClient, "Действующий клиент")
+Person(callManager, "Менеджер кол-центра")
+Person(depositOps, "Сотрудник депозитного бэк-офиса")
+Person(creditOps, "Сотрудник кредитного бэк-офиса")
+
+System_Ext(callcenter, "Система кол-центра", "Существующая система")
+System_Ext(smsGateway, " смс-шлюз", "Доставка  смс")
+System_Ext(idCheck, "Отделение банка", "Личная идентификация нового клиента")
+
+System_Boundary(solution, "Контур цифрового открытия депозитов") {
+  Container(website, "Публичный сайт", "Web application", "Каталог продуктов и форма заявки нового клиента")
+  Container(ibFrontend, "Интернет-банк — UI", "Клиентский интерфейс: каталог, выбор счёта, суммы, подача заявки, статусы")
+  Container(ibBackend, "Интернет-банк — backend")
+  Container(ibAdapter, "Адаптер интернет-банка", "Фасад для legacy; преобразует запросы в API,события новых сервисов")
+  Container(otp, "Сервис  смс-подтверждения", "Выдача и проверка OTP, TTL, лимиты попыток и повторной отправки")
+  Container(depositApi, "Сервис открытия депозитов (СОД)", "API заявок, валидация, жизненный цикл")
+  Container(depositDb, "БД заявок и аудита", "Заявки, статусы, история действий")
+  Container(rateService, "Сервис справочника ставок", "Версионирование продуктов, ставок, публикация данных")
+  Container(rateDb, "БД справочника", "Централизованные продукты, ставки, периоды действия и права")
+  Container(boUi, "Рабочее место депозитного бэк-офиса", "Очередь заявок, проверка, подтверждение условий, просмотр истории")
+  Container(kafka, "Брокер событий",  "Асинхронный обмен, повторная доставка")
+  Container(absAdapter, "Интеграционный адаптер АБС", "Преобразование событий в интерфейс АБС, rate limiting, retry и контроль доставки")
+}
+
+System_Boundary(absBoundary, "АБС — детализация") {
+  Container(absUi, "Рабочее место АБС", "Существующий UI", "Сотрудник подтверждает условия и выполняет открытие по действующему процессу")
+  Container(absApp, "Прикладной контур АБС", "Существующая платформа", "Бизнес-правила, проверки, согласование ставки и операция открытия депозита")
+  Container(absDb, "База данных АБС", "Счета, клиенты, депозиты и результаты операций")
+  Rel(absUi, absApp, "Выполняет операции")
+  Rel(absApp, absDb, "Читает, изменяет банковские данные")
+}
+
+Rel(newClient, website, "Просматривает продукты и подаёт заявку")
+Rel(website, rateService, "Запрашивает опубликованный каталог", "https/rest")
+Rel(website, depositApi, "Создаёт заявку нового клиента", "https/rest")
+Rel(depositApi, kafka, "Публикует событие новой заявки")
+Rel(kafka, callcenter, "Передаёт лида в CRM", "Адаптер/коннектор — контракт уточнить")
+Rel(callManager, callcenter, "Обрабатывает лида")
+Rel(newClient, idCheck, "Проходит личную идентификацию")
+
+Rel(existingClient, ibFrontend, "Работает в интернет-банке")
+Rel(ibFrontend, ibBackend, "Внутренний вызов")
+Rel(ibBackend, ibAdapter, "Запрос каталога, заявка, статусы", "Защищённый внутренний API")
+Rel(ibAdapter, rateService, "Получает продукты и персонализированные ставки", "https/rest")
+Rel(ibAdapter, depositApi, "Передаёт заявку и запрашивает статусы", "https/rest")
+Rel(depositApi, otp, "Создаёт и проверяет OTP")
+Rel(otp, smsGateway, "Отправляет одноразовый код", "https/api")
+Rel(existingClient, otp, "Вводит полученный код", "Через UI интернет-банка")
+
+Rel(depositOps, boUi, "Работает с очередью заявок")
+Rel(creditOps, boUi, "Управляет справочником в рамках прав")
+Rel(boUi, depositApi, "Обрабатывает заявки")
+Rel(boUi, rateService, "Создаёт,изменяет ставки при наличии прав")
+Rel(depositApi, depositDb, "Читает,сохраняет заявки и аудит")
+Rel(rateService, rateDb, "Читает,изменяет версии справочника")
+Rel(depositApi, kafka, "Публикует команды и события")
+Rel(kafka, absAdapter, "Передаёт команды согласования,открытия")
+Rel(absAdapter, absApp, "Вызывает поддерживаемый интерфейс АБС", "Адаптер,очередь,API")
+Rel(absApp, absAdapter, "Возвращает результат операции")
+Rel(absAdapter, kafka, "Публикует результат обработки")
+Rel(kafka, depositApi, "Доставляет результат и обновление статуса")
+Rel(depositApi, smsGateway, "Отправляет  смс о подтверждении ставки и открытии", "Через отдельные события,уведомительный адаптер")
+
+Rel(ibAdapter, kafka, "Обмен событиями при необходимости")
+Rel(depositApi, depositDb, "Transactional outbox,inbox")
+Rel(absAdapter, kafka, "Повторная доставка и DLQ")
+
+SHOW_LEGEND()
+@enduml
